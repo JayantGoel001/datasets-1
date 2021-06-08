@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import fsspec
 import numpy as np
 
+from datasets.splits import NamedSplit, Split
 from datasets.utils.doc_utils import is_documented_by
 
 from .arrow_dataset import Dataset
@@ -29,6 +30,20 @@ class DatasetDict(dict):
                 raise TypeError(
                     "Values in `DatasetDict` should of type `Dataset` but got type '{}'".format(type(dataset))
                 )
+
+    def __getitem__(self, k) -> Dataset:
+        if isinstance(k, (str, NamedSplit)) or len(self) == 0:
+            return super().__getitem__(k)
+        else:
+            available_suggested_splits = [
+                str(split) for split in (Split.TRAIN, Split.TEST, Split.VALIDATION) if split in self
+            ]
+            suggested_split = available_suggested_splits[0] if available_suggested_splits else list(self)[0]
+            raise KeyError(
+                f"Invalid key: {k}. Please first select a split. For example: "
+                f"`my_dataset_dictionary['{suggested_split}'][{k}]`. "
+                f"Available splits: {sorted(self)}"
+            )
 
     @property
     def data(self) -> Dict[str, Table]:
@@ -691,11 +706,10 @@ class DatasetDict(dict):
             fs (:class:`~filesystems.S3FileSystem` or ``fsspec.spec.AbstractFileSystem``, optional, default ``None``):
                 Instance of the remote filesystem used to download the files from.
             keep_in_memory (:obj:`bool`, default ``None``): Whether to copy the dataset in-memory. If `None`, the
-                dataset will be copied in-memory if its size is smaller than
-                `datasets.config.HF_MAX_IN_MEMORY_DATASET_SIZE_IN_BYTES` (default `250 MiB`). This behavior can be
-                disabled (i.e., the dataset will not be loaded in memory) by setting to ``0`` either the configuration
-                option ``datasets.config.HF_MAX_IN_MEMORY_DATASET_SIZE_IN_BYTES`` (higher precedence) or the environment
-                variable ``HF_MAX_IN_MEMORY_DATASET_SIZE_IN_BYTES`` (lower precedence).
+                dataset will be copied in-memory if its size is smaller than `datasets.config.IN_MEMORY_MAX_SIZE`
+                (default ``250 * 2 ** 20`` B). This behavior can be disabled (i.e., the dataset will not be loaded in
+                memory) by setting to ``0`` either the configuration option ``datasets.config.IN_MEMORY_MAX_SIZE``
+                (higher precedence) or the environment variable ``HF_DATASETS_IN_MEMORY_MAX_SIZE`` (lower precedence).
 
         Returns:
             :class:`DatasetDict`
