@@ -1,4 +1,5 @@
 import copy
+import itertools
 import json
 import os
 import pickle
@@ -13,7 +14,7 @@ import pytest
 from absl.testing import parameterized
 
 import datasets.arrow_dataset
-from datasets import concatenate_datasets, load_from_disk, temp_seed
+from datasets import concatenate_datasets, interleave_datasets, load_from_disk, temp_seed
 from datasets.arrow_dataset import Dataset, transmit_format, update_metadata_with_features
 from datasets.dataset_dict import DatasetDict
 from datasets.features import Array2D, Array3D, ClassLabel, Features, Sequence, Value
@@ -828,6 +829,22 @@ class BaseDatasetTest(TestCase):
                     )
                     self.assertEqual(len(dset_test.cache_files), 0 if in_memory else 2)
                     self.assertListEqual(dset_test["id"], list(range(30)))
+                    self.assertNotEqual(dset_test._fingerprint, fingerprint)
+                    assert_arrow_metadata_are_synced_with_dataset_features(dset_test)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:  # num_proc > num rows
+            with self._create_dummy_dataset(in_memory, tmp_dir) as dset:
+                self.assertDictEqual(dset.features, Features({"filename": Value("string")}))
+                fingerprint = dset._fingerprint
+                with dset.select([0, 1], keep_in_memory=True).map(picklable_map_function, num_proc=10) as dset_test:
+                    self.assertEqual(len(dset_test), 2)
+                    self.assertDictEqual(dset.features, Features({"filename": Value("string")}))
+                    self.assertDictEqual(
+                        dset_test.features,
+                        Features({"filename": Value("string"), "id": Value("int64")}),
+                    )
+                    self.assertEqual(len(dset_test.cache_files), 0 if in_memory else 2)
+                    self.assertListEqual(dset_test["id"], list(range(2)))
                     self.assertNotEqual(dset_test._fingerprint, fingerprint)
                     assert_arrow_metadata_are_synced_with_dataset_features(dset_test)
 
@@ -2099,6 +2116,36 @@ def test_concatenate_datasets_duplicate_columns(dataset):
     with pytest.raises(ValueError) as excinfo:
         concatenate_datasets([dataset, dataset], axis=1)
     assert "duplicated" in str(excinfo.value)
+
+
+def test_interleave_datasets():
+    d1 = Dataset.from_dict({"a": [0, 1, 2]})
+    d2 = Dataset.from_dict({"a": [10, 11, 12, 13]})
+    d3 = Dataset.from_dict({"a": [22, 21, 20]}).select([2, 1, 0])
+    dataset = interleave_datasets([d1, d2, d3])
+    expected_length = 3 * min(len(d1), len(d2), len(d3))
+    expected_values = [x["a"] for x in itertools.chain(*zip(d1, d2, d3))]
+    assert isinstance(dataset, Dataset)
+    assert len(dataset) == expected_length
+    assert dataset["a"] == expected_values
+    assert dataset._fingerprint == interleave_datasets([d1, d2, d3])._fingerprint
+
+
+def test_interleave_datasets_probabilities():
+    seed = 42
+    probabilities = [0.3, 0.5, 0.2]
+    d1 = Dataset.from_dict({"a": [0, 1, 2]})
+    d2 = Dataset.from_dict({"a": [10, 11, 12, 13]})
+    d3 = Dataset.from_dict({"a": [22, 21, 20]}).select([2, 1, 0])
+    dataset = interleave_datasets([d1, d2, d3], probabilities=probabilities, seed=seed)
+    expected_length = 7  # hardcoded
+    expected_values = [10, 11, 20, 12, 0, 21, 13]  # hardcoded
+    assert isinstance(dataset, Dataset)
+    assert len(dataset) == expected_length
+    assert dataset["a"] == expected_values
+    assert (
+        dataset._fingerprint == interleave_datasets([d1, d2, d3], probabilities=probabilities, seed=seed)._fingerprint
+    )
 
 
 @pytest.mark.parametrize(
