@@ -235,6 +235,15 @@ def test_load_dataset_streaming(dataset_loading_script_dir, data_dir):
     assert isinstance(next(iter(dataset["train"])), dict)
 
 
+@require_streaming
+def test_load_dataset_streaming_gz_json(jsonl_gz_path):
+    data_files = jsonl_gz_path
+    ds = load_dataset("json", split="train", data_files=data_files, streaming=True)
+    assert isinstance(ds, IterableDataset)
+    ds_item = next(iter(ds))
+    assert ds_item == {"col_1": "0", "col_2": 0, "col_3": 0.0}
+
+
 def test_loading_from_the_datasets_hub():
     with tempfile.TemporaryDirectory() as tmp_dir:
         dataset = load_dataset(SAMPLE_DATASET_IDENTIFIER, cache_dir=tmp_dir)
@@ -326,3 +335,13 @@ def test_load_from_disk_with_default_in_memory(
 
     with assert_arrow_memory_increases() if expected_in_memory else assert_arrow_memory_doesnt_increase():
         _ = load_from_disk(dataset_path)
+
+
+def test_remote_data_files():
+    repo_id = "albertvillanova/tests-raw-jsonl"
+    filename = "wikiann-bn-validation.jsonl"
+    data_files = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{filename}"
+    ds = load_dataset("json", split="train", data_files=data_files, streaming=True)
+    assert isinstance(ds, IterableDataset)
+    ds_item = next(iter(ds))
+    assert ds_item.keys() == {"langs", "ner_tags", "spans", "tokens"}
